@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import Footer from "@/components/footer";
 import { Analytics } from "@vercel/analytics/react";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
@@ -36,9 +35,7 @@ export const metadata: Metadata = {
     description:
       "Simulate various CPU scheduling algorithms for learning and testing.",
   },
-  
 };
-
 
 export default function RootLayout({
   children,
@@ -52,9 +49,7 @@ export default function RootLayout({
         content="l7MqVL5_9AEbO8FaJpT-XLlxSLYCdbCoIrV0Y4G9IXw"
       />
 
-      <body
-        className={cn("antialiased" , inter.className)}
-      >
+      <body className={cn("antialiased", inter.className)}>
         <div className="flex flex-col min-h-screen">
           <ThemeProvider
             attribute="class"
@@ -65,9 +60,8 @@ export default function RootLayout({
             <main className="flex-grow">{children}</main>
             <Toaster richColors position="top-center" />
           </ThemeProvider>
-          <Footer />
         </div>
-        <Analytics/>
+        <Analytics />
       </body>
     </html>
   );

@@ -38,7 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "./ui/input";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import GanttChart from "./GanttChart";
 import { SummaryTable } from "./SummaryTable";
@@ -51,9 +51,11 @@ import { toast } from "sonner";
 
 const FormSchema = z
   .object({
-    algorithm: z.string({
-      required_error: "Please select an algorithm to display.",
-    }).min(1, { message: "Please select an algorithm to display." }),
+    algorithm: z
+      .string({
+        required_error: "Please select an algorithm to display.",
+      })
+      .min(1, { message: "Please select an algorithm to display." }),
     quantum: z.coerce
       .number()
       .lte(100, { message: "Quantum cannot be greater than 100." })
@@ -70,9 +72,8 @@ const FormSchema = z
     {
       message: "Time Quantum must be greater than 0.",
       path: ["quantum"],
-    }
+    },
   );
-
 
 type Process = {
   process_id: number;
@@ -89,9 +90,15 @@ export default function MainForm() {
   const normalizeAlgorithm = (algo?: string | null) => {
     if (!algo) return null;
     const a = algo.toLowerCase();
-    if (a === "fcfs" || a === "firstcomefirstserve" || a === "first_come_first_serve") return "FCFS";
+    if (
+      a === "fcfs" ||
+      a === "firstcomefirstserve" ||
+      a === "first_come_first_serve"
+    )
+      return "FCFS";
     if (a === "rr" || a === "roundrobin" || a === "round_robin") return "RR";
-    if (a === "sjf" || a === "shortestjobfirst" || a === "shortest_job_first") return "SJF";
+    if (a === "sjf" || a === "shortestjobfirst" || a === "shortest_job_first")
+      return "SJF";
     if (
       a === "srtf" ||
       a === "shortestremainingtimefirst" ||
@@ -146,13 +153,14 @@ export default function MainForm() {
 
   const summaryRef = useRef<HTMLDivElement>(null);
 
+  const algorithmValue = form.watch("algorithm");
+
   // Sync selectedAlgorithm with form value on mount and changes
   useEffect(() => {
-    const formAlgo = form.getValues("algorithm");
-    if (formAlgo && formAlgo !== selectedAlgorithm) {
-      setSelectedAlgorithm(formAlgo);
+    if (algorithmValue && algorithmValue !== selectedAlgorithm) {
+      setSelectedAlgorithm(algorithmValue);
     }
-  }, [form.watch("algorithm")]);
+  }, [algorithmValue, selectedAlgorithm]);
 
   // Load processes from URL on mount (only once)
   useEffect(() => {
@@ -175,7 +183,7 @@ export default function MainForm() {
         }
         if (Array.isArray(parsed)) {
           setProcesses(parsed as Process[]);
-          
+
           // If we have both algo and processes, trigger auto-submit
           if (algo && parsed.length > 0) {
             setShouldAutoSubmit(true);
@@ -191,19 +199,53 @@ export default function MainForm() {
     setHasLoadedFromUrl(true);
   }, [searchParams, hasLoadedFromUrl]);
 
+  const onSubmit = useCallback(
+    (data: z.infer<typeof FormSchema>) => {
+      let sequence: Process[] = [];
+      if (processes.length === 0) {
+        toast.error("No processes added!");
+        return;
+      }
+      switch (data.algorithm) {
+        case "FCFS":
+          sequence = firstComeFirstServe(processes);
+          break;
+        case "SJF":
+          sequence = shortestJobFirst(processes);
+          break;
+        case "RR":
+          sequence = roundRobin(processes, data.quantum ?? 0);
+          break;
+        case "SRTF":
+          sequence = shortestRemainingTimeFirst(processes);
+          break;
+        default:
+          break;
+      }
+
+      setResultSequence(sequence);
+      setFinalizedProcesses([...processes]);
+      setTimeout(() => {
+        summaryRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 0);
+    },
+    [processes],
+  );
+
   // Auto-submit when loaded from URL
   useEffect(() => {
     if (shouldAutoSubmit && processes.length > 0 && selectedAlgorithm) {
-      // Small delay to ensure form is populated
-      setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
         const formData = form.getValues();
         if (formData.algorithm) {
           onSubmit(formData as z.infer<typeof FormSchema>);
           setShouldAutoSubmit(false); // Only auto-submit once
         }
       }, 200);
+
+      return () => window.clearTimeout(timeoutId);
     }
-  }, [shouldAutoSubmit, processes.length, selectedAlgorithm]);
+  }, [shouldAutoSubmit, processes.length, selectedAlgorithm, form, onSubmit]);
 
   // Update URL when processes, algorithm or quantum changes
   useEffect(() => {
@@ -258,8 +300,8 @@ export default function MainForm() {
         prevProcesses.map((process, index) =>
           index === currentEditIndex
             ? { ...newProcess, process_id: process.process_id } // Retain original process_id
-            : process
-        )
+            : process,
+        ),
       );
       setCurrentEditIndex(null); // Reset after editing
     } else {
@@ -296,7 +338,7 @@ export default function MainForm() {
         position: "top-center",
       });
     }
-  }
+  };
   const generateRandomColor = () => {
     const hue = Math.floor(Math.random() * 360);
     const saturation = 60 + Math.floor(Math.random() * 40); // 60-100%
@@ -307,7 +349,7 @@ export default function MainForm() {
   const generateRandomProcesses = () => {
     const numProcesses = Math.floor(Math.random() * 3) + 3; // 3-5 processes
     const newProcesses: Process[] = [];
-    
+
     for (let i = 0; i < numProcesses; i++) {
       newProcesses.push({
         process_id: i + 1,
@@ -316,51 +358,21 @@ export default function MainForm() {
         background: generateRandomColor(),
       });
     }
-    
+
     // Sort by arrival time for better visualization
     newProcesses.sort((a, b) => a.arrival_time - b.arrival_time);
-    
+
     // Reassign process_ids after sorting to maintain correct color mapping
     newProcesses.forEach((process, index) => {
       process.process_id = index + 1;
     });
-    
+
     setProcesses(newProcesses);
     toast.success(`Generated ${numProcesses} random processes!`);
   };
 
-  function onSubmit(data: z.infer<typeof FormSchema>) {
-    let sequence: Process[] = [];
-    if (processes.length === 0) {
-      toast.error("No processes added!");
-      return;
-    }
-    switch (data.algorithm) {
-      case "FCFS":
-        sequence = firstComeFirstServe(processes);
-        break;
-      case "SJF":
-        sequence = shortestJobFirst(processes);
-        break;
-      case "RR":
-        sequence = roundRobin(processes, data.quantum ?? 0);
-        break;
-      case "SRTF":
-        sequence = shortestRemainingTimeFirst(processes);
-      default:
-        break;
-    }
-
-    setResultSequence(sequence);
-    setFinalizedProcesses([...processes]);
-    setTimeout(() => {
-      summaryRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 0);
-  }
-
   return (
     <div className="grid grid-cols-2 w-full max-w-full space-y-5 md:space-y-0 overflow-hidden justify-items-center">
-      
       <div className="row-span-2 col-span-2 md:col-span-1 max-w-full md:pl-14 flex flex-col items-center px-4">
         <div className="md:max-w-[300px] border p-4 rounded-xl">
           <Form {...form}>
@@ -404,27 +416,25 @@ export default function MainForm() {
               />
               {/* Algorithm descriptions */}
               {selectedAlgorithm && (
-                <div 
+                <div
                   className="text-sm text-muted-foreground p-3 bg-muted rounded-md cursor-pointer transition-all select-none"
                   onClick={() => setDescriptionRevealed(!descriptionRevealed)}
                   title="Click to reveal description"
                 >
                   <p className={descriptionRevealed ? "" : "blur-sm"}>
-                    {selectedAlgorithm === "FCFS" && (
-                      "Processes are executed in the order they arrive. Simple but may cause long waiting times."
-                    )}
-                    {selectedAlgorithm === "SJF" && (
-                      "Executes the shortest job first. Minimizes average waiting time but may cause starvation."
-                    )}
-                    {selectedAlgorithm === "RR" && (
-                      "Each process gets a fixed time quantum in circular order. Fair and responsive for time-sharing systems."
-                    )}
-                    {selectedAlgorithm === "SRTF" && (
-                      "Preemptive version of SJF. Always executes the process with the shortest remaining time."
-                    )}
+                    {selectedAlgorithm === "FCFS" &&
+                      "Processes are executed in the order they arrive. Simple but may cause long waiting times."}
+                    {selectedAlgorithm === "SJF" &&
+                      "Executes the shortest job first. Minimizes average waiting time but may cause starvation."}
+                    {selectedAlgorithm === "RR" &&
+                      "Each process gets a fixed time quantum in circular order. Fair and responsive for time-sharing systems."}
+                    {selectedAlgorithm === "SRTF" &&
+                      "Preemptive version of SJF. Always executes the process with the shortest remaining time."}
                   </p>
                   {!descriptionRevealed && (
-                    <p className="text-xs text-center mt-1 opacity-70">Click to reveal</p>
+                    <p className="text-xs text-center mt-1 opacity-70">
+                      Click to reveal
+                    </p>
                   )}
                 </div>
               )}
@@ -451,10 +461,12 @@ export default function MainForm() {
                 />
               )}
               <div className="flex gap-2">
-                <Button type="submit" className="flex-1">Submit</Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button type="submit" className="flex-1">
+                  Submit
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
                   size="icon"
                   onClick={handleShare}
                   title="Share configuration"
@@ -476,8 +488,8 @@ export default function MainForm() {
               <CardTitle>Processes</CardTitle>
               <CardDescription>Add a process to simulate it</CardDescription>
             </div>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="icon"
               onClick={generateRandomProcesses}
               title="Generate random processes"
@@ -538,12 +550,12 @@ export default function MainForm() {
                 />
               </PopoverContent>
             </Popover>
-            <Button 
+            <Button
               onClick={() => {
                 setProcesses([]);
                 setResultSequence([]);
                 setFinalizedProcesses([]);
-              }} 
+              }}
               className="w-fit"
             >
               Clear all processes
